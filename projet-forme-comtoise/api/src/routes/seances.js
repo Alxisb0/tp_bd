@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { Seance } from '../models/Seance.js';
+import { invaliderPlanning } from '../cache.js';
 
 export const routeurSeances = Router();
 
@@ -14,6 +15,7 @@ routeurSeances.patch('/seances/:id/annuler', async (req, res, next) => {
       { new: true }
     ).select('_id club_id debut annulee').lean();
     if (!seance) return res.status(404).json({ erreur: 'seance inconnue' });
+    await invaliderPlanning(seance.club_id);
     res.json(seance);
   } catch (e) { next(e); }
 });

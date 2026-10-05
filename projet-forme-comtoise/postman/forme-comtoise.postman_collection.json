@@ -579,12 +579,131 @@
           }
         }
       ]
+    },
+    {
+      "name": "Rapport",
+      "item": [
+        {
+          "name": "Demander le rapport",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('statut 202', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('rapport', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rapports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rapports"
+              ]
+            },
+            "description": "demande le rapport de frequentation de la derniere saison ; repond tout de suite 202, le worker travaille en arriere-plan",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"debut\": \"2025-09-01\", \"fin\": \"2026-08-31\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Suivre le rapport",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('statut 200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "if (r.statut === 'en_attente' || r.statut === 'en_cours') {",
+                  "  pm.execution.setNextRequest('Suivre le rapport');   // rejouer cette meme requete",
+                  "  setTimeout(() => {}, 2000);                         // apres une pause de 2 s",
+                  "} else {",
+                  "  pm.test('rapport termine', () => pm.expect(r.statut).to.eql('termine'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rapports/{{rapport}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rapports",
+                "{{rapport}}"
+              ]
+            },
+            "description": "se rejoue toutes les 2 secondes tant que le rapport est en_attente ou en_cours (dans le Runner ou avec newman)"
+          }
+        },
+        {
+          "name": "Telecharger le PDF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('statut 200', () => pm.response.to.have.status(200));",
+                  "pm.test('c est un PDF', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/pdf'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rapports/{{rapport}}/pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rapports",
+                "{{rapport}}",
+                "pdf"
+              ]
+            },
+            "description": "telecharge le PDF une fois le rapport termine (409 s'il n'est pas encore pret)"
+          }
+        }
+      ]
     }
   ],
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://localhost:3000"
+    },
+    {
+      "key": "rapport",
+      "value": ""
     }
   ]
 }

@@ -1,0 +1,78 @@
+# Pile complete : docker compose up
+# Les donnees (./data) sont montees en lecture seule, jamais copiees dans une image.
+
+services:
+  mongo:
+    image: mongo:8.2
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # lance une fois, reconstruit les collections, puis s'arrete
+  migration:
+    build: ./migration
+    environment:
+      MONGO_URI: mongodb://mongo:27017/forme-comtoise
+      SQLITE_PATH: /data/forme-comtoise.sqlite
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: ./api
+    ports:
+      - "3000:3000"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/forme-comtoise
+      REDIS_URL: redis://redis:6379
+      RAPPORTS_DIR: /rapports
+      # CACHE_ACTIF=0 desactive le cache (voir bench/) ; par defaut il est actif
+      CACHE_ACTIF: ${CACHE_ACTIF:-1}
+      PORT: "3000"
+    volumes:
+      - rapports:/rapports:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+
+  # produit les rapports PDF : lit l'export des tourniquets dans ./data (lecture seule)
+  worker:
+    build: ./worker
+    environment:
+      MONGO_URI: mongodb://mongo:27017/forme-comtoise
+      REDIS_URL: redis://redis:6379/0
+      CSV_PATH: /data/passages-2024-2026.csv
+      RAPPORTS_DIR: /rapports
+    volumes:
+      - ./data:/data:ro
+      - rapports:/rapports
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+
+volumes:
+  mongo_data:
+  rapports:

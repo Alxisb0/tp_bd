@@ -9,7 +9,9 @@
     "test": "node --test"
   },
   "dependencies": {
+    "celery-node": "^0.5.9",
     "express": "^5.1.0",
+    "ioredis": "^5.11.1",
     "mongoose": "^9.9.5"
   }
 }

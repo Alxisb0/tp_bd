@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Club } from '../models/Club.js';
 import { Seance } from '../models/Seance.js';
 import { Adherent } from '../models/Adherent.js';
+import { avecCache } from '../cache.js';
 
 export const routeurClubs = Router();
 
@@ -11,6 +12,44 @@ routeurClubs.get('/clubs', async (req, res, next) => {
     res.json({ clubs });
   } catch (e) { next(e); }
 });
+
+// Seances non annulees du club entre deux dates, avec le coach et les places restantes.
+async function lirePlanning(clubId, debutSemaine, finSemaine) {
+  return Seance.aggregate([
+    { $match: {
+      club_id: clubId,
+      annulee: false,
+      debut: { $gte: debutSemaine, $lt: finSemaine },
+    } },
+    { $lookup: {
+      from: 'coachs',
+      localField: 'coach_id',
+      foreignField: '_id',
+      as: 'coach',
+    } },
+    { $unwind: '$coach' },
+    { $project: {
+      _id: 1,
+      debut: 1,
+      salle: 1,
+      places: 1,
+      activite: 1,
+      coach: { prenom: '$coach.prenom', nom: '$coach.nom' },
+      // une place compte comme prise sauf si la reservation a ete annulee
+      places_restantes: {
+        $subtract: [
+          '$places',
+          { $size: { $filter: {
+            input: '$reservations',
+            as: 'r',
+            cond: { $ne: ['$$r.statut', 'annulee'] },
+          } } },
+        ],
+      },
+    } },
+    { $sort: { debut: 1 } },
+  ]);
+}
 
 // Planning d'un club pour une semaine, avec les places restantes de chaque
 // cours. "debut" est le lundi de la semaine, au format AAAA-MM-JJ.
@@ -24,42 +63,13 @@ routeurClubs.get('/clubs/:id/planning', async (req, res, next) => {
     const debutSemaine = new Date(`${debut}T00:00:00Z`);
     const finSemaine = new Date(debutSemaine.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const seances = await Seance.aggregate([
-      { $match: {
-        club_id: clubId,
-        annulee: false,
-        debut: { $gte: debutSemaine, $lt: finSemaine },
-      } },
-      { $lookup: {
-        from: 'coachs',
-        localField: 'coach_id',
-        foreignField: '_id',
-        as: 'coach',
-      } },
-      { $unwind: '$coach' },
-      { $project: {
-        _id: 1,
-        debut: 1,
-        salle: 1,
-        places: 1,
-        activite: 1,
-        coach: { prenom: '$coach.prenom', nom: '$coach.nom' },
-        // une place compte comme prise sauf si la reservation a ete annulee
-        places_restantes: {
-          $subtract: [
-            '$places',
-            { $size: { $filter: {
-              input: '$reservations',
-              as: 'r',
-              cond: { $ne: ['$$r.statut', 'annulee'] },
-            } } },
-          ],
-        },
-      } },
-      { $sort: { debut: 1 } },
-    ]);
-
-    res.json({ club_id: clubId, debut: debutSemaine, fin: finSemaine, seances });
+    // cache 60 s : les places restantes bougent a chaque reservation, mais on
+    // efface les cles du club a chaque changement, la duree n'est qu'un filet
+    const corps = await avecCache(res, `planning:${clubId}:${debut}`, 60, async () => {
+      const seances = await lirePlanning(clubId, debutSemaine, finSemaine);
+      return { club_id: clubId, debut: debutSemaine, fin: finSemaine, seances };
+    });
+    res.json(corps);
   } catch (e) { next(e); }
 });
 

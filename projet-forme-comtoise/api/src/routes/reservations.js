@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Seance } from '../models/Seance.js';
 import { Adherent } from '../models/Adherent.js';
 import { Formule } from '../models/Formule.js';
+import { invaliderPlanning } from '../cache.js';
 
 export const routeurReservations = Router();
 
@@ -58,6 +59,7 @@ routeurReservations.post('/seances/:id/reservations', async (req, res, next) => 
       return res.status(409).json({ erreur: 'plus de place disponible' });
     }
 
+    await invaliderPlanning(seance.club_id);
     res.status(201).json({ seance_id: seanceId, adherent_id: adherentId, statut: 'confirmee' });
   } catch (e) { next(e); }
 });
@@ -67,14 +69,17 @@ routeurReservations.delete('/seances/:id/reservations/:adherentId', async (req, 
     const seanceId = Number(req.params.id);
     const adherentId = Number(req.params.adherentId);
 
-    const resultat = await Seance.collection.updateOne(
+    // on recupere aussi le club de la seance, pour vider son planning en cache
+    const resultat = await Seance.collection.findOneAndUpdate(
       { _id: seanceId, reservations: { $elemMatch: { adherent_id: adherentId, statut: 'confirmee' } } },
-      { $set: { 'reservations.$.statut': 'annulee' } }
+      { $set: { 'reservations.$.statut': 'annulee' } },
+      { projection: { club_id: 1 }, includeResultMetadata: true }
     );
 
-    if (resultat.matchedCount === 0) {
+    if (!resultat.value) {
       return res.status(404).json({ erreur: 'reservation introuvable ou deja traitee' });
     }
+    await invaliderPlanning(resultat.value.club_id);
     res.json({ seance_id: seanceId, adherent_id: adherentId, statut: 'annulee' });
   } catch (e) { next(e); }
 });
